@@ -20,3 +20,4 @@ Use `/report` API which returns a paginated list of all URLs crawled to date, wi
 You can also use the `/cosine` API to create a vector embedding of the text
 in each url and return a cosine distance matrix for each URL pair.
 
+
