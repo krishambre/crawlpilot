@@ -1,29 +1,27 @@
 import json
 import requests
-import asyncio
 import time
-import aiohttp
+import random
 import threading
 from django.http import JsonResponse, HttpResponseBadRequest
-from django.core import serializers
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import generics
 from rest_framework.pagination import PageNumberPagination
 from bs4 import BeautifulSoup
-from asgiref.sync import sync_to_async, async_to_sync
 from threading import Lock
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 from summarizer import Summarizer
 from .models import ScrapeResult
+from .models import RequestMap
 from .serializers import ScrapeResultSerializer
 
 counter_lock = Lock()
 
 request_counter = {}
 
-request_status_map = {}
+#request_status_map = {}
 
 def scrape_url(request):
 
@@ -33,7 +31,7 @@ def scrape_url(request):
     return JsonResponse({url: scrape(url)})
 
 @csrf_exempt
-async def bulk_scrape(request):
+def bulk_scrape(request):
     if request.method != 'POST':
         return HttpResponseBadRequest('Only POST method is allowed')
 
@@ -44,10 +42,12 @@ async def bulk_scrape(request):
         return JsonResponse({'error': 'Missing URLs in request body'}, status=400)
 
     # Generate a request ID based on the current time
-    request_id = str(int(time.time()))
+    request_id = str(int(time.time())) + str(random.randint(1000, 9999))
 
     # Set the status for this request to "in progress"
-    request_status_map[request_id] = "in progress"
+    #request_status_map[request_id] = "in progress"
+    request_map = RequestMap(request_id=request_id, status='pending')
+    request_map.save()
 
     request_len = len(urls)
 
@@ -64,7 +64,6 @@ def fetch(session, url):
         return response.text()
     
 def async_scrape(request_id, url, request_len):
-    print("Scraping URL:", url)
     response = requests.get(url,timeout=10)
     soup = BeautifulSoup(response.text, 'html.parser')
     title = soup.find('h1').text if soup.find('h1') else "No title found"
@@ -81,7 +80,10 @@ def async_scrape(request_id, url, request_len):
     # If all URLs have been processed, set the status to "complete"
     if request_counter[request_id] == request_len:
         with counter_lock:
-            request_status_map[request_id] = "complete"
+            #request_status_map[request_id] = "complete"
+            request_map = RequestMap.objects.get(request_id=request_id)
+            request_map.status = 'completed'
+            request_map.save()
 
 def scrape(url):
 
@@ -96,8 +98,7 @@ def scrape(url):
     return {'title': title, 'summary': summary, 'links': links}
 
 def get_scrape_results(request,request_id):
-    print("request_id:",request_id,"and status:",request_status_map.get(request_id),"counter:",request_counter.get(request_id))
-    if request_status_map.get(request_id) != "complete":
+    if RequestMap.objects.get(request_id=request_id).status != "completed":
         return JsonResponse({'status': 'in progress'})
 
     results = ScrapeResult.objects.filter(request_id=request_id)
@@ -133,14 +134,6 @@ def get_cosine_similarity(request, request_id):
         url_to_similarity[url1] = similarity
 
     return JsonResponse({request_id: url_to_similarity})
-
-def get_all_results(request):
-    results = ScrapeResult.objects.all()
-    results_dict = {result.request_id: {'url': result.url, 'title': result.title, 'summary': result.summary, 'links': result.links} for result in results}
-    return JsonResponse(results_dict)
-
-def get_request_status(request):
-    return JsonResponse(request_status_map)
 
 class StandardResultsSetPagination(PageNumberPagination):
     page_size = 10

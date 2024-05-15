@@ -7,3 +7,7 @@ class ScrapeResult(models.Model):
     title = models.CharField(max_length=255)
     links = models.TextField()
     summary = models.TextField(default='No summary available')
+
+class RequestMap(models.Model):
+    request_id = models.CharField(max_length=200)
+    status = models.CharField(max_length=200)
